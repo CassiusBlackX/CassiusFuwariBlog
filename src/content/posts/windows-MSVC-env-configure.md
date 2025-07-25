@@ -3,7 +3,7 @@ title: configure MSVC env on windows
 published: 2025-07-25
 description: '在Windows电脑上配置MSVC环境变量'
 image: ''
-tags: ["windows", "C"]
+tags: ["windows", "cpp"]
 category: 'deployment'
 draft: false 
 lang: ''
@@ -44,4 +44,22 @@ cl的路径在`%MSVC_INSTALL_PATH%\VC\Tools\MSVC\${VERSION}\bin\Hostx64\x64`中�
 cmake会位于`%WINDOWS_KITS_PATH%\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin`中，只要把这个变量添加到环境变量中即可
 
 ## vcpkg的配置
-vcpkg会位于`%WINDOWS_KITS_PATH%\VC\vcpkg`中
+vcpkg会位于`%WINDOWS_KITS_PATH%\VC\vcpkg`中，建议直接新建一个变量`VCPKG_ROOT`，把这个变量的值设置为vcpkg的路径
+
+### cmake+vcpkg的使用
+在使用cmake构建项目，并且依赖vcpkg下载第三方库的时候,CMakeLists.txt要做如下的配置。其中`$ENV{VCPKG_ROOT}`能够直接捕获环境变量中`VCPKG_ROOT`的值，这样的话只要系统的环境变量配置正确，就一定可以确保vcpkg是可用的了。
+```cmake
+cmake_minimum_required(VERSION 3.10)
+
+if(DEFINED ENV{VCPKG_ROOT})
+    set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+else()
+    message(STATUS "VCPKG_ROOT is not defined, using system libraries if available.")
+endif()
+
+# `CMAKE_TOOLCHAIN_FILE` must be configured before `project`, or it is not going to work
+project(your_project_name)
+```
+
+# 解决在vscode中，使用cmake构建项目，使用MSVC编译时候，中文输出乱码的问题
+进入vscode设置，直接查找`Cmake: Output Log Encoding`，改为utf-8即可
