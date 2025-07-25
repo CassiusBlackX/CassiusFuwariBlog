@@ -1,6 +1,6 @@
 ---
 title: 计算机系统结构复习
-published: 2025-06-24
+published: 2025-06-18
 description: '华中科技大学 计算机科学与技术学院 计算机系统结构复习'
 image: ''
 tags: ["HUST", "architecture"]
