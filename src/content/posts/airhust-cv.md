@@ -47,7 +47,7 @@ cd darknet
 `make`是一个工程项目构建文件。实际作用类似`cmake`。当然，这里其实倒反天罡了，正确的描述应该是cmake像make，因为make比cmake早很多。现在cmake使用的会比make更频繁一些，也是因为make的语法比较抽象，不是特别容易写和读。相比之下cmake就会简单很多。当然，如果仔细观察过cmake之后的build文件夹的话，会发现里面其实仍然是有Makefile的。
 
 在这里我们必须要去修改Makefile文件，不然如果使用默认编译的话是无法在较快的时间内训练出一个能够使用的模型的。
-```Makefile
+```txt
 GPU=0
 CUDNN=0
 OPENCV=0
