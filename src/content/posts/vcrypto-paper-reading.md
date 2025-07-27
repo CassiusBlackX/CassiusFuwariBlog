@@ -1,7 +1,7 @@
 ---
 title: vcrypto-paper-reading
 published: 2025-07-25
-description: ''
+description: '对论文vCrypto: a Unified Para-Virtualization Framework for Heterogeneous Cryptographic Resources的阅读笔记'
 image: ''
 tags: ["linux", "virtualization"]
 category: notes

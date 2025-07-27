@@ -48,7 +48,7 @@ mkdir -p $WORK_TREE
 git --work-tree=$WORK_TREE --git-dir=$GIT_DIR checkout -f
 
 cd $WORK_TREE
-# 保险期间,使用完整路径来使用pnpm
+# 保险起见,使用完整路径来使用pnpm
 /root/.nvm/versions/node/v22.17.1/bin/pnpm install 
 /root/.nvm/versions/node/v22.17.1/bin/pnpm build
 
