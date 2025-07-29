@@ -32,7 +32,7 @@ qemu-system-x86_64 \
     -m 2048 \
     -smp 2 \
     -enable-kvm \
-    -drive file=ubuntu24.img,format=qcow2 \
+    -drive file=ubuntu24.qcow2,format=qcow2 \
     -cdrom ./ubuntu-24.04.2-live-server-amd64.iso \
     -nographic \
     -serial mon:stdio \
