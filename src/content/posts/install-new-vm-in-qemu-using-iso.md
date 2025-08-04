@@ -62,3 +62,20 @@ qemu-system-x86_64 \
 ssh -L 5901:localhost:5901 <username>@<server-ip> -p <ssh-port> -N -f
 ```
 使用上面这个命令，会把服务器的5901端口(第一个5901)映射到本地的5901端口(第二个5901),然后使用tigerVNC的时候访问localhost:5901就可以了。需要注意，在访问的时候，最好保证这个ssh终端不被关闭。
+
+## 通过端口转发的方式，ssh连接虚拟机
+再启动虚拟机的时候通过以下命令，尤其是`-netdev`和`-device`两行，指定了使用虚拟网卡e1000，并且端口转发，把虚拟机的22端口转发到宿主机的2222端口
+```shell
+qemu-system-x86_64 \
+    -m 2048 \
+    -smp 2 \
+    -drive file=ubuntu2004.qcow2,format=qcow2 \
+    -netdev user,id=mynet0,hostfwd=tcp::2222-:22 \
+    -device e1000,netdev=mynet0 \
+    -nographic \
+    -enable-kvm
+```
+接下来使用ssh就可以连接到虚拟机了
+```shell
+ssh {vm-user-name}@localhost -p 2222
+```
