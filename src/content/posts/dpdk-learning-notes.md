@@ -1,7 +1,7 @@
 ---
 title: dpdk-learning-notes
 published: 2025-08-02
-description: ''
+description: 'dpdk的一些笔记'
 image: ''
 tags: ["dpdk"]
 category: 'notes'

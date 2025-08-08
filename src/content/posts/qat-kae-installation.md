@@ -1,10 +1,10 @@
 ---
 title: qat-kae-installation
 published: 2025-08-08
-description: ''
+description: '安装qat和kae时候的一些踩坑记录'
 image: ''
-tags: []
-category: ''
+tags: ["qat", "kae"]
+category: 'deployment'
 draft: false 
 lang: ''
 ---
