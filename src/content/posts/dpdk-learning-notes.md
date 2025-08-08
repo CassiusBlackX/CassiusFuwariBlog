@@ -18,7 +18,7 @@ lang: ''
 
 ## core components
 ### ring manager
-+ 提供一个无锁的FIFO,多生产者、多消费者的有限大小的表.
++ 提供一个无锁的FIFO,多生产者、多消费者的有限大小的table。
 + `Memory Pool Library`中使用的就是ring
 ### memory pool manager
 + 一个pool是由name来标识的,用ring来存储free objects
