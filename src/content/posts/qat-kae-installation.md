@@ -62,3 +62,173 @@ penssl version -a | grep ENGINESDIR
 
 ### 安装
 确保`OPENSSL_ENGINES`环境变量设置正确,其它步骤和华为网站上一致,但是不要使用rpm安装,最好使用源码编译安装,rpm里面有一些环境变量被写死了,因为openssl的路径不一致的问题,导致rpm安装后openssl还是无法使用kae的
+
+
+# 在服务器上安装qat
+在戴尔PowerEdge R750xs上，安装DH895XCC对应的QAT sriov的驱动
+## 系统准备
+### 依赖安装
+```shell
+sudo apt-get update
+sudo apt-get install -y libsystemd-dev
+sudo apt-get install -y libudev-dev
+sudo apt-get install -y libreadline6-dev
+sudo apt-get install -y pkg-config
+sudo apt-get install -y libxml2-dev
+sudo apt-get install -y libpci-dev
+sudo apt-get install -y libboost-all-dev
+sudo apt-get install -y libelf-dev
+sudo apt-get install -y linux-headers-$(uname -r)
+sudo apt-get install -y build-essential
+sudo apt-get install -y nasm
+sudo apt-get install -y zlib1g-dev
+sudo apt-get install -y libssl-dev
+sudo apt-get install -y libnl-3-dev libnl-genl-3-dev
+sudo apt-get install -y gcc-12
+```
+需要安装以上依赖包
+
+### 驱动安装
+手动下载QAT的tar包，上传到服务器上，根据intel官网的手册照着做就可以了。
+```shell
+export ICP_ROOT=/QAT
+mkdir -p $ICP_ROOT
+cd $ICP_ROOT
+# mv QAT tar to current directory
+tar -zxof QAT20.L.*.tar.gz
+# ./configure # defualt
+./configure --enable-icp-sriov=host
+make -j 48 install
+make samples-install
+usermod -a -G qat `whoami`
+# exit and re-login
+lsmod | grep qat  # should see a series of ouput after the cmd
+service start qat_service
+systemctl status qat_service # check the status of qat_service
+```
+
+### 开启系统IOMMU
+修改`/etc/default/grub`文件中的内容,把`GRUB_CMDLINE_LINUX_DEFAULT`的内容修改为如下形式
+```plaintext
+GRUB_CMDLINE_LINUX_DEFAULT="quiet splash iommu=pt intel_iommu=on"
+```
+也可选的直接在这里开启巨页
+```plaintext
+GRUB_CMDLINE_LINUX_DEFAULT="quiet splash default_hugepagesz=1G hugepagesz=1G hugepages=30 iommu=pt intel_iommu=on"
+```
+然后更新grub
+```shell
+sudo update-grub
+sudo reboot
+```
+重启以后才生效
+
+## 准备测试环境
+### dpdk
+克隆下来dpdk的代码，并且编译
+```shell
+meson -Dexamples=all setup build
+cd build
+ninja
+sudo ninja install
+```
+### qemu-system
+安装qemu-system-x86_64
+```shell
+sudo apt install qemu-system
+```
+### 分配巨页
+> 如果在之前调整`GRUB_CMDLINE_LINUX_DEFAULT`的时候就已经配置过巨页了，这一步就可以跳过
+```shell
+echo 8192 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
+```
+### 启动虚拟机
+```shell
+qemu-system-x86_64 \
+        -cpu host \
+        -m 8192 \  # 这里分配的内存大小必须和后面的-object memory-backend-file一致，受限于系统中分配的巨页总大小
+        -smp 16 \  # 为了在虚拟机里面调试方便，编译速度快一点，所以多分配一些核心给虚拟机
+        -enable-kvm \
+        -drive file=vcrypto.qcow2,format=qcow2 \
+        -nographic \
+        -netdev user,id=mynet0,hostfwd=tcp::2222-:22 -device e1000,netdev=mynet0 \  # 吧虚拟机的22端口映射到本地的2222端口，方便通过ssh连接到虚拟机
+        -chardev socket,id=chr0,path=/tmp/vhost_crypto.sock \
+        -object cryptodev-vhost-user,id=crypto0,chardev=chr0 \
+        -device virtio-crypto-pci,cryptodev=crypto0 \
+        -object memory-backend-file,id=mem,size=8G,mem-path=/dev/hugepages,share=on \
+        -mem-prealloc \
+        -numa node,memdev=mem
+```
+### 进入虚拟机的准备
+绑定设备
+```shell
+echo "ubuntu" | sudo -S modprobe uio_pci_generic
+echo "ubuntu" | sudo -S sh -c "echo -n 0000:00:04.0 > /sys/bus/pci/drivers/virtio-pci/unbind"
+echo "ubuntu" | sudo -S sh -c 'echo "1af4 1054" > /sys/bus/pci/drivers/uio_pci_generic/new_id'
+```
+在虚拟机里也挂载巨页
+```shell
+echo "ubuntu" | sudo -S mkdir -p /mnt/huge
+echo "ubuntu" | sudo -S mount -t hugetlbfs nodev /mnt/huge
+```
+分配巨页
+```shell
+echo "ubuntu" | sudo -S sh -c "echo 2048 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages"
+```
+
+### 运行vcrypto-engine后端
+### 通过openssl测试vcrypto-engine前端
+使用多个进程来测试openssl在不使用和使用vcrypto engine，在同时处理多个加密任务时候的性能
+```shell
+#!/bin/bash
+
+sizes=(16 64 256 1024 2048)
+num_processes=50 # 并发进程数
+tmp_dir=$(mktemp -d)
+
+# 输出表头
+printf "%-10s %-15s %-15s %-10s\n" "BlockSize" "DefaultSpeed" "VcryptoSpeed" "Ratio"
+
+for size in "${sizes[@]}"; do
+  default_speeds=()
+  vcrypto_speeds=()
+
+  # 并行测试默认实现
+  for ((i=0; i<num_processes; i++)); do
+    (
+      result=$(openssl speed -elapsed -evp aes-256-cbc -bytes "$size" 2>/dev/null | grep "^aes-256-cbc")
+      speed=$(awk '{print $2}' <<< "$result")
+      echo "$speed" > "$tmp_dir/default_${size}_$i"
+    ) &
+  done
+  wait
+
+  # 并行测试vcrypto实现
+  for ((i=0; i<num_processes; i++)); do
+    (
+      result=$(OPENSSL_ENGINES=/usr/lib/x86_64-linux-gnu/engines-1.1 openssl speed -elapsed -engine vcrypto -evp aes-256-cbc -bytes "$size" 2>/dev/null | grep "^aes-256-cbc")
+      speed=$(awk '{print $2}' <<< "$result")
+      echo "$speed" > "$tmp_dir/vcrypto_${size}_$i"
+    ) &
+  done
+  wait
+
+  # 收集结果并计算平均值
+  default_avg=$(awk '{sum+=$1} END {print int(sum/NR)}' "$tmp_dir"/default_"$size"_* 2>/dev/null || echo "N/A")
+  vcrypto_avg=$(awk '{sum+=$1} END {print int(sum/NR)}' "$tmp_dir"/vcrypto_"$size"_* 2>/dev/null || echo "N/A")
+
+  # 计算加速比
+  if [[ "$default_avg" != "N/A" && "$vcrypto_avg" != "N/A" && "$vcrypto_avg" -ne 0 ]]; then
+    ratio=$(awk -v d="$default_avg" -v v="$vcrypto_avg" 'BEGIN { printf "%.2f", d/v }')
+  else
+    ratio="N/A"
+  fi
+
+  # 输出结果
+  printf "%-10s %-15s %-15s %-10s\n" "${size}B" "${default_avg}k" "${vcrypto_avg}k" "$ratio"
+done
+
+# 清理临时文件
+rm -rf "$tmp_dir"
+```
+> TODO: 目前发现
