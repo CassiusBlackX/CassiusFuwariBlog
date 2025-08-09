@@ -142,6 +142,12 @@ sudo apt install qemu-system
 ```shell
 echo 8192 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
 ```
+### 启动dpdk的vhost_crypto
+```shell
+sudo ./build/examples/dpdk-vhost_crypto \
+  -l 1-3 -n 4  -- \
+  --socket-file 2,/tmp/vhost_crypto.sock
+```
 ### 启动虚拟机
 ```shell
 qemu-system-x86_64 \
@@ -231,4 +237,4 @@ done
 # 清理临时文件
 rm -rf "$tmp_dir"
 ```
-> TODO: 目前发现
+> TODO: 如果仅使用单进程测试的情况下，不使用vcrypto engine比使用了还能高出来8万多倍！
