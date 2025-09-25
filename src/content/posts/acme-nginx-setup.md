@@ -69,7 +69,7 @@ acme.sh --issue --nginx -d test.example.com
 # HTTP 配置 - 监听 80 端口并重定向所有流量到 HTTPS
 server {
     listen 80;
-    server_name blog.cassiusblack.top;
+    server_name test.example.com;
 
     root /var/www/html;  # 默认生成的静态网页放在/var/www/html下
     index index.html;
@@ -87,8 +87,8 @@ server {
     listen 443 ssl;
     server_name test.example.com;
 
-    ssl_certificate /etc/nginx/tls/test_fullchain.crt;
-    ssl_certificate_key /etc/nginx/tls/test.key;
+    ssl_certificate /etc/nginx/ssl/test_fullchain.crt;
+    ssl_certificate_key /etc/nginx/ssl/test.key;
 
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384';
@@ -118,11 +118,11 @@ server {
 
 server {
     listen 443 ssl;
-    server_name meeting.cassiusblack.top;
+    server_name test.example.com;
 
     # SSL 证书配置
-    ssl_certificate /etc/nginx/tls/test_fullchain.crt;
-    ssl_certificate_key /etc/nginx/tls/test.key;
+    ssl_certificate /etc/nginx/ssl/test_fullchain.crt;
+    ssl_certificate_key /etc/nginx/ssl/test.key;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384';
     ssl_prefer_server_ciphers off;
@@ -158,3 +158,29 @@ acme.sh --install-cert -d test.example.com --key-file /etc/nginx/tls/test.key --
 
 ## 测试
 重载nginx服务一遍，同时确保ping自己的域名的时候能够解析出服务器的IP。然后就可以通过浏览器登录了。
+
+
+# 源码编译安装nginx
+源码编译nginx，包括stream模块，这样nginx就可以直接转发tcp流量。
+```sh
+./configure \
+  --prefix=/usr/local/nginx \
+  --conf-path=/etc/nginx/nginx.conf \
+  --sbin-path=/usr/sbin/nginx \
+  --error-log-path=/var/log/nginx/error.log \
+  --http-log-path=/var/log/nginx/access.log \
+  --pid-path=/var/run/nginx.pid \
+  --lock-path=/var/lock/nginx.lock \
+  --modules-path=/usr/lib/nginx/modules \
+  --with-http_ssl_module \
+  --with-stream \
+  --with-stream_ssl_module \
+  --with-stream_ssl_preread_module \
+  --with-threads \
+  --with-file-aio \
+  --with-http_v2_module \
+  --with-http_gzip_static_module \
+  --with-http_realip_module \
+  --with-http_stub_status_module \
+  --with-cc-opt='-O3 -march=native -pipe'
+```
