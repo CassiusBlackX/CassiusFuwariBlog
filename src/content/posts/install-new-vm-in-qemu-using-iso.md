@@ -4,7 +4,7 @@ published: 2025-07-28
 description: '从一个iso文件安装一台qemu虚拟机'
 image: ''
 tags: ["qemu", "virtualization"]
-category: 'deploy'
+category: deployment
 draft: false 
 lang: ''
 ---

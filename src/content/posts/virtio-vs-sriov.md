@@ -3,7 +3,7 @@ title: virtio-vs-sriov
 published: 2025-09-03
 description: 'virtio, vhost, sriov comparison'
 image: ''
-tags: ['virtulization', 'virtio', 'sriov']
+tags: ['virtualization', 'virtio', 'sriov']
 category: 'notes'
 draft: false 
 lang: ''

@@ -72,3 +72,62 @@ git push blog main
 把本地的main分支推送到远程,可以在输出中看到,当文件上传完以后,post-receive脚本被自动执行.并且对应的脚本执行时候的输出会在本地展示,输出的每行前面会有remote:标识.
 
 没有遇到报错就说明成功了
+
+# 更新博客的最新版本代码
+该博客是使用的是[fuwari blog](https://github.com/saicaca/fuwari)的框架搭建的博客，目前还在积极维护中。前端时间在push到github上的时候，github actions自动检查失败。推测是本地的代码部分不符合linter或者其它的要求，所以需要更新代码部分，同时保留我自己的posts。
+
+## 准备
+为了数据安全，在进行之后的操作前，首先把本地的所有要保存的修改commit，并切换到新的分支，做接下来的修改。
+```sh
+git add .
+git commit -m "commit before merging from fuwari upstream"
+git checkout -b dev
+```
+## 合并上游代码
+首先添加fuwari的上游github仓库的最新代码
+```sh
+git remote add fuwari https://github.com/saicaca/fuwari
+git fetch fuwari
+```
+一口气都合并到当前dev分支中
+```sh
+git merge fuwari/main --allow-unrelated-historyies -X theirs
+```
+接下来就可以看到有新增文件和修改的文件。此时自己逐个选择需要恢复的文件，使用命令
+```sh
+git checkout HEAD~1 -- <文件路径1> <文件路径2> ...
+```
+就可以把要自己版本的博客内容文件恢复回来。
+
+## 合并回自己的main分支
+建议首先在本地编译并检查一下当前的效果是否正确，是否把要保留的本地文件都全部选择对了。然后仍然在dev分支中，add并提交这些修改的文件
+```sh
+git add <修改了的文件>
+git commit -m "merge latest code from upstream"
+```
+然后切换回main分支并合并dev分支
+```sh
+git checkout main
+git merge dev
+git push origin main
+```
+等待github action自检成功并没有问题，就说明成功了。
+
+## 可能可以使用的方法（未测试）
+创建/编辑.gitattributes文件
+```sh
+# files that always use local version
+src/content/posts/ merge=ours
+src/config.ts merge=ours
+
+# other files use default merge strategy
+* merge=normal
+```
+定义合并驱动
+```sh
+git config merge.ours.driver true
+```
+合并
+```sh
+git merge fuwari/main --allow-unrelated-histories
+```

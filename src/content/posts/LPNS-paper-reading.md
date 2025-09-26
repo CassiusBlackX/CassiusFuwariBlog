@@ -206,7 +206,7 @@ HostOS构造NVMe指令,然后放到submission queue中,并告知NVMe控制器.NV
     + related works: VFIO, VirtIO, SPDK, MDev-NVMe, VirtIO-fs, SR-IOV, FVM, BM-store
 
 ## motivation
-+ limitation of the current storage virtulization
++ limitation of the current storage virtualization
   + only concentrating on high throughput, no efficient latency-predicatble QoS control
   + inaccurate perception of the imbalanced multi-tenant workloads with different QoS requirement
   + cannot bypass the device-sdie latency interference on the OS level
@@ -250,7 +250,7 @@ HostOS构造NVMe指令,然后放到submission queue中,并告知NVMe控制器.NV
   + the polling thread can monitor the workload and control the command distribution speed
   + LPNS Module can control the throttling IVM throughput as $\theta$ times of IOPS of SVM with the slowest submission rate
   + a deterministic queuing system with deterministic network calculus
-+ using the deterministic network calculus to modle NVMe virtulization
++ using the deterministic network calculus to modle NVMe virtualization
   + Concentraing point: 4K block size random read and write, the device-level latency interference are caused by the congestion on the SSD controller
   + scenario: j iVMs co-running with i SVM, the IOPS of SVM is p and its command queue depth is d
   + arrive curve: $\alpha (t) = v \cdot t + b = (p \cdot (j \cdot \theta + i)) \cdot t + d \cdot(j \cdot \theta + i)$
