@@ -160,27 +160,56 @@ acme.sh --install-cert -d test.example.com --key-file /etc/nginx/tls/test.key --
 重载nginx服务一遍，同时确保ping自己的域名的时候能够解析出服务器的IP。然后就可以通过浏览器登录了。
 
 
-# 源码编译安装nginx
+# 源码编译安装nginx with h3 compatible
 源码编译nginx，包括stream模块，这样nginx就可以直接转发tcp流量。
+
+同时支持h3(quic) 为此,不使用系统自带的openssl(因为版本过老 3.0.13,不完整支持quic),转而使用boringssl
+
+## 安装boringssl
+### 克隆boringssl
+```sh
+git clone https://boringssl.googlesource.com/boringssl
+```
+### 编译boringssl
+```sh
+cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+## 编译nginx
+### 配置nginx编译参数
 ```sh
 ./configure \
-  --prefix=/usr/local/nginx \
-  --conf-path=/etc/nginx/nginx.conf \
-  --sbin-path=/usr/sbin/nginx \
-  --error-log-path=/var/log/nginx/error.log \
-  --http-log-path=/var/log/nginx/access.log \
-  --pid-path=/var/run/nginx.pid \
-  --lock-path=/var/lock/nginx.lock \
-  --modules-path=/usr/lib/nginx/modules \
-  --with-http_ssl_module \
-  --with-stream \
-  --with-stream_ssl_module \
-  --with-stream_ssl_preread_module \
-  --with-threads \
-  --with-file-aio \
-  --with-http_v2_module \
-  --with-http_gzip_static_module \
-  --with-http_realip_module \
-  --with-http_stub_status_module \
-  --with-cc-opt='-O3 -march=native -pipe'
+    --prefix=/usr/local/nginx \
+    --conf-path=/etc/nginx/nginx.conf \
+    --sbin-path=/usr/sbin/nginx \
+    --error-log-path=/var/log/nginx/error.log \
+    --http-log-path=/var/log/nginx/access.log \
+    --pid-path=/var/run/nginx.pid \
+    --lock-path=/var/lock/nginx.lock \
+    --modules-path=/usr/lib/nginx/modules \
+    --with-http_ssl_module \
+    --with-stream \
+    --with-stream_ssl_module \
+    --with-stream_ssl_preread_module \
+    --with-threads \
+    --with-file-aio \
+    --with-http_v2_module \
+    --with-http_gzip_static_module \
+    --with-http_realip_module \
+    --with-http_stub_status_module \
+    --with-http_v3_module \
+    --with-cc-opt="-O3 -march=native -pipe -I ../boringssl/include" \
+    --with-ld-opt="-L ../boringssl/build -lssl -lcrypto -lstdc++"
+```
+### 编译并安装nginx
+```sh
+make -j$(nproc)
+make install
+```
+
+### 测试nginx
+```sh
+nginx -t
+nginx -V
 ```
