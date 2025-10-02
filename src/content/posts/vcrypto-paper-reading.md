@@ -132,7 +132,7 @@ lang: ''
 
 ### engine frontend
 + 一个动态库，类似OpenSSL engines
-+ 当被客户进程加载的时候，船舰一条unix socket通信到engine后端
++ 当被客户进程加载的时候，创建一条unix socket通信到engine后端
 + engine后端创建一个trans queue并返回对应的配置(start virtual addr & queue length)
 + 客户程序是用标准OpenSSL API就可以把crypto request卸载到engine前端上
 + 一个fiber一次会卸载一个crypto request,并且记录这个crypto request object的地址。（其中crypto request obeject是由前端创建的）
@@ -302,8 +302,8 @@ QEMU Hypervisor运行在宿主机的用户态进程中，vcrypto-host运行在�
 
 + 以需要创建会话对象时的控制面请求为例，具体可分为三个步骤
   + 运行在虚拟机中的vcrypto-engine将表示需要创建会话对象的session会话请求添加到控制面队列contrl queue随即通过VM-Exit陷入QEMU Hypervisor,由于QEMU Hypervisor将session会话请求转发给vcrypto-host
-  + vcrypto-host根据从session会话请求中解析出的密钥等加解密元山上，在本地进程创建会话对象并为其分配会话ID，建立起两者的映射关系后将会话ID返回给QEMU Hypervisor
-  + QEMU Hypervisor将收到的会话ID通过session会话请求反抗者给vcrypto engine
+  + vcrypto-host根据从session会话请求中解析出的密钥等加解密元数据，在本地进程创建会话对象并为其分配会话ID，建立起两者的映射关系后将会话ID返回给QEMU Hypervisor
+  + QEMU Hypervisor将收到的会话ID通过session会话请求返回给vcrypto engine
 
 vcrypto-host需要在本地创建会话对象是因为一个会话对象会涉及多个加解密请求，仅由vcrypto-engine管理会话对象无法合理管理其生命周期，因此作为半虚拟化后端的vcrypto-host需要管理该元数据。
 
@@ -311,8 +311,8 @@ vcrypto-host需要在本地创建会话对象是因为一个会话对象会涉�
 vcrypto-host与vcrypto-engine在数据面请求上的通信涉及到半虚拟化框架前后端通信。
 
 + 以下发crypto加解密请求为例，具体可分为两个步骤
-  + 运行在虚拟机中的vcrypto-engine将crypto加解密请求添加到数据面队列data queue，该过程不会坏过QEMU Hypervisor
-  + vcrypto-host根据crypto加解密请求间接就oqudc会话对象，根据数据面队列data queue中crypto加解密请求的内容获取到就解密数据，构造本地crypto加解密请求下发给物理硬件设备
+  + 运行在虚拟机中的vcrypto-engine将crypto加解密请求添加到数据面队列data queue，该过程不会经过QEMU Hypervisor
+  + vcrypto-host根据crypto加解密请求间接就会话对象，根据数据面队列data queue中crypto加解密请求的内容获取到就解密数据，构造本地crypto加解密请求下发给物理硬件设备
 
 vcrypto-host需要在本地构造crypto加解密请求的原因同样是为了合理管理其生命周期。
 
