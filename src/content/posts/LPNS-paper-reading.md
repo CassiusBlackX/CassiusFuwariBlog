@@ -3,7 +3,7 @@ title: LPNS-paper-reading
 published: 2025-07-16
 description: '论文LPNS: Scalable and Latency-Predictable Local Storage Virtualization for Unpredictable NVMe SSDs in Clouds的阅读笔记'
 image: ''
-tags: ["linux", "virtualization", "notes"]
+tags: ["linux", "virtualization"]
 category: notes
 draft: false 
 lang: ''
