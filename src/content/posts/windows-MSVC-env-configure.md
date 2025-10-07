@@ -3,7 +3,7 @@ title: configure MSVC env on windows
 published: 2025-07-25
 description: '在Windows电脑上配置MSVC环境变量'
 image: ''
-tags: ["windows"]
+tags: ["Windows"]
 category: 'deployment'
 draft: false 
 lang: ''
