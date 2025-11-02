@@ -71,7 +71,6 @@ sudo firewall-cmd --permanent --zone=trusted --add-interface=br0
 sudo firewall-cmd --reload
 ```
 
-
 # libvirt相关配置
 ## 把普通用户加入到libvirt用户组
 1. 添加到组
@@ -140,3 +139,4 @@ export LIBVIRT_DEFAULT_URI="qemu:///system"
 ## 启动虚拟机
 使用virsh create命令启动
 ### VNC连接到虚拟机
+使用tigerVNC或者VNC viewer即可。如果连接不上需要检查，是否是物理机的防火墙，对应的端口（如5900）没有开放。
