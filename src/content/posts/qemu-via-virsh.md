@@ -25,7 +25,8 @@ ls /sys/module/kvm
 ```
 
 # 准备虚拟机网络
-## 搭建linux网桥
+## 网桥方式
+### 搭建linux网桥
 1. 安装bridge-utils包
 ```sh
 yum install -y bridge-utils
@@ -47,14 +48,14 @@ ifconfig eno2 0.0.0.0
 ```sh
 ifconfig br0 192.168.1.2 netmask 255.255.255.0
 ```
-## 配置流量转发
+### 配置流量转发
 虚拟机之后讲使用br0上网，但是仍然需要具体的流量转发。
-### 启用IP转发
+#### 启用IP转发
 ```sh
 echo 'net.ipv4.ip_forward = 1' | sudo tee -a /etc/sysctl.conf
 sudo sysctl -p
 ```
-### 添加MASQUERADE规则
+#### 添加MASQUERADE规则
 1. 查看zone
 ```sh
 firewall-cmd --get-active-zones
@@ -70,6 +71,80 @@ sudo firewall-cmd --reload
 sudo firewall-cmd --permanent --zone=trusted --add-interface=br0
 sudo firewall-cmd --reload
 ```
+
+## 使用libvirtd的默认配置
+只要在virsh配置文件中，配置网络模式为
+```xml
+<interface type='network'>
+        <source network='default'/>
+        <model type='virtio'/>
+</interface>
+```
+就可以。
+
+libvirtd的默认配置是让虚拟机通过NAT上网。
+
+在libvirtd是active状态的时候，应该能够在`ip a`之后能够看到以下输出
+```
+10: virbr0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+    link/ether 52:54:00:80:d4:63 brd ff:ff:ff:ff:ff:ff
+    inet 192.168.122.1/24 brd 192.168.122.255 scope global virbr0
+       valid_lft forever preferred_lft forever
+```
+这个就是libvirtd的默认网络配置方式，虚拟机将以DHCP的方式获得到一个192.168.122.0/24网段中的IP
+
+### 为虚拟机配置静态IP
+在虚拟机启动起来，以后，可以使用以下命令查看到虚拟机现在的MAC地址
+```sh
+virsh dumpxml oetest | grep -A5 '<interface'
+```
+获得的输出应该类似于
+```xml
+<interface type='network'>
+  <mac address='52:54:00:aa:bb:cc'/>
+  <source network='default'/>
+  <model type='virtio'/>
+</interface>
+```
+复制其中的mac地址，添加到虚拟机配置文件中。
+
+接下来，需要配置以下libvirt的default网络配置。
+```sh
+virsh net-dumpxml default > default.xml
+```
+编辑default.xml
+```xml
+<network>
+  <name>default</name>
+  <uuid>d7a0129d-bc30-484c-877f-b68e3530b70f</uuid>
+  <forward mode='nat'>
+    <nat>
+      <port start='1024' end='65535'/>
+    </nat>
+  </forward>
+  <bridge name='virbr0' stp='on' delay='0'/>
+  <mac address='52:54:00:80:d4:63'/>
+  <ip address='192.168.122.1' netmask='255.255.255.0'>
+    <dhcp>
+      <range start='192.168.122.2' end='192.168.122.254'/>
+      <!-- 添加的是下面这一行 -->
+      <host mac='52:54:00:65:00:a7' ip='192.168.122.2'/>
+    </dhcp>
+  </ip>
+</network>
+```
+在`dhcp`域中，为这台虚拟机的MAC配置一个静态的DHCP地址。
+
+然后重载网络配置
+```sh
+virsh net-destroy default
+virsh net-undefine default
+virsh net-define default.xml
+virsh net-start default
+virsh net-autostart default
+```
+
+最后重启虚拟机，即可确认虚拟机的确分配到了`192.168.122.2`的IP了
 
 # libvirt相关配置
 ## 把普通用户加入到libvirt用户组
@@ -108,8 +183,15 @@ export LIBVIRT_DEFAULT_URI="qemu:///system"
                         <target dev='vda' bus='virtio'/>
                         <boot order='1'/>
                 </disk>
-                <interface type='bridge'>
+                <!-- 如果使用网桥模式上网 -->
+                <!-- <interface type='bridge'>
                         <source bridge='br0'/>
+                        <model type='virtio'/>
+                </interface> -->
+                <!-- 如果使用libvirtd的default模式上网 -->
+                <interface type='network'>
+                        <source network='default'/>
+                        <mac address="52:54:00:65:00:a7"/>
                         <model type='virtio'/>
                 </interface>
                 <graphics type='vnc' listen='0.0.0.0' port='5900' keymap='en-us'/>

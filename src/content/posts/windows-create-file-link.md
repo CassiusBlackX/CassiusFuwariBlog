@@ -4,7 +4,7 @@ published: 2025-10-07
 description: Windows上创建符号链接、软链接、影链接
 image: ''
 tags: ['Windows']
-category: ''
+category: cmd
 draft: false 
 lang: ''
 ---

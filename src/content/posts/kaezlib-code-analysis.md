@@ -4,7 +4,7 @@ published: 2025-10-02
 description: 'analyse how kaezlib dump workload to accelerator'
 image: ''
 tags: ["kae"]
-category: ''
+category: notes
 draft: false 
 lang: ''
 ---
