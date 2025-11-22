@@ -31,3 +31,6 @@ yarn.lock
 *.iml
 .vscode/
 .vs/
+
+# windows
+desktop.ini
