@@ -38,7 +38,7 @@ NVMePass有两个关键且独特的设计：
 
 I/O队列是通过在虚拟NVMe设备中创建一个virtual Controller Memory Buffer(CMB)以及一个自定义的page fault handler来在虚拟机和宿主机之间建立直接地址映射来实现。
 CMB仅用于虚拟化设备来提供内存映射的支持，并不需要专门的硬件支持。
-安全机制是通过NRD，并把NRD集成到NVMe控制器固件中，以拦截非法的NVMe I/O请求。NVMe硬件资源呗独立分配，且为每个虚拟机分配不重叠的安全区域，从而确保强大的隔离性。
+安全机制是通过NRD，并把NRD集成到NVMe控制器固件中，以拦截非法的NVMe I/O请求。NVMe硬件资源被独立分配，且为每个虚拟机分配不重叠的安全区域，从而确保强大的隔离性。
 
 NVMePass可提供接近原生的性能，除了通过I/O队列直通外，还支持DMA和中断重映射，适用于无需hypervisor的虚拟机，从而消除虚拟化开销。
 把NVMe设备划分为控制资源和数据资源。控制资源包括PCIe configuration space, base addr registers(BARs)和admin queue。
@@ -49,7 +49,7 @@ NVMePass由4个组件组成:NP前端驱动，NP后端驱动，NP设备管理器�
 NP后端负责管理NVMe物理数据资源，为虚拟机创建I/O队列和关联的doorbell registers。
 这样的配置下允许虚拟机直接访问I/O队列，但仍确保了不同虚拟机之间的I/O队列的隔离。
 它还同时支持DMA事务和中断处理，不需要hypervisor的参与。
-NP设备管理器位于hypervisor中，模拟控制资源，并将分配的数据资源组合成面向虚拟机的全功能NVMe设备。
+NP设备管理器位于hypervisor中，模拟控制资源，并将分配的数据资源组组合起来面向虚拟机的全功能NVMe设备。
 NP guarder验证虚拟机提交的NMVe I/O命令的LBA和DMA操作防止恶意租户的破坏。
 
 与现有的硬件辅助方案相比，NVMePass具有轻量、简单和灵活的优势，对于NVMePass，硬件的唯一要求是支持NVMe SSD中的NRD，以确保安全性。这一功能仅需要NVMe控制器固件实现，几百行C就可以。
@@ -114,12 +114,12 @@ NVMe I/O queue的一次流程如下
 ![流程](./fig3.png)
 
 #### 1
-guest中的NP前端驱动将I/O请求提交到CMB中的I/O SQ，MMU会将I/O队列的GBA转换为GPA。然后，EPT从MMU接管GPA并在HPA中查找IOdvlp的GPA。
+guest中的NP前端驱动将I/O请求提交到CMB中的I/O SQ，MMU会将I/O队列的GVA转换为GPA。然后，EPT从MMU接管GPA并在HPA中查找IO队列的GPA。
 如果GPA未映射，那么会产生一个page fault一场，然后转到**2**。否则，会直接进行到**3**。
 一旦EPT中建立了IO队列和doorbell register的条目，VM就可以直接访问NVMe I/O队列了。后续的I/O请求也不会再出现page fault。
 
 #### 2
-NVMePass实现了自己的page fault handler。该handler获取相应的SQ的HPA，并再EPT中建立GPA到HPA的映射（步骤2a）。完成映射后，返回并继续执行EPT中的GPA到HPA的地址转换（步骤2b）。CQ和doorbell register的GPA-HPA映射也类似的方式实现。
+NVMePass实现了自己的page fault handler。该handler获取相应的SQ的HPA，并在EPT中建立GPA到HPA的映射（步骤2a）。完成映射后，返回并继续执行EPT中的GPA到HPA的地址转换（步骤2b）。CQ和doorbell register的GPA-HPA映射也类似的方式实现。
 
 #### 3
 EPT负责根据已经建立的页表天使，把guest IO queue的GPA翻译到HPA。因此，虚拟机可以访问host内存中的SQ以提交IO命令。随后，该命令由NVMe设备获取并执行。
@@ -134,9 +134,9 @@ GPA-HPA的映射建立仅仅会在对本页面的第一次请求的时候触发�
 ### 隔离
 NVMePass为虚拟机提供独立的硬件资源和不重叠的地址区域，确保强大的隔离性。
 
-首先，LBA由NVMePass设备管理器和NP前端驱动程序隔离。NP后端驱动程序为不同的virualized disks分配不重叠的LBA范围，并将这些信息存储再设备的CMB中。当VM中的IO请求通过`nvme_submit_cmd`提交时，NP前端驱动程序会根据LBA范围信息调整IO命令的`slba`，从而确保不同VM可访问的磁盘空间不会重叠。
+首先，LBA由NVMePass设备管理器和NP前端驱动程序隔离。NP后端驱动程序为不同的virualized disks分配不重叠的LBA范围，并将这些信息存储再设备的CMB中。当VM中的IO请求通过`nvme_submit_cmd`提交时，NP前端驱动程序会根据LBA范围信息调整IO命令的`slba`(starting LBA)，从而确保不同VM可访问的磁盘空间不会重叠。
 
-其次，IOdvlp和相关寄存器由虚拟机管理程序创建的EPT隔离。每个虚拟机都有其独立的IO队列和EPT页表，没有其它虚拟机能够访问它们。
+其次，IO队列和相关寄存器由虚拟机管理程序创建的EPT隔离。每个虚拟机都有其独立的IO队列和EPT页表，没有其它虚拟机能够访问它们。
 
 最后，virtualized disks的DMA地址也在hypervisor中由EPT隔离。不同虚拟机为NVMe设备向host内存发起的DMA地址被映射到不同的HPA，这确保了不同虚拟机无法访问相同的内存地址。
 
@@ -145,15 +145,15 @@ NVMePass通过虚拟机的IO队列和doorbell register隔离到hypervisor中的�
 此外，在NVMe控制器固件中也实现了NP guarder，以验证每个NVMe IO命令中的LBA,以拦截来自恶意虚拟机中的非法请求。
 
 #### IO队列和doorbell register的保护
-NVMe提交命令有64字节，因此一个4K页面可以容纳64个NVMe命令。一个SQ通常由1024条目，分布在16个页面上。类似的，NVMe完成命令为16字节，1024条目的CQ分布在4个页面上。
-因此，不同的VM的IOdvlp位于不同的页面上，并通过EPT地址转换进行保护，从而防止恶意VM访问其它VM的队列。
+NVMe提交命令有64字节，因此一个4K页面可以容纳64个NVMe命令。一个SQ通常有1024条目，分布在16个页面上。类似的，NVMe完成命令为16字节，1024条目的CQ分布在4个页面上。
+因此，不同的VM的IO队列位于不同的页面上，并通过EPT地址转换进行保护，从而防止恶意VM访问其它VM的队列。
 
 此外，每个IO queue pair(SQ+CQ)都包含一个4字节的寄存器(SQ tail doorbell register & CQ head doorbell register)，因此每个IO queue pair的总寄存器大小为8字节。
 鉴于一个4K页面可容纳512个IO queue pair，恶意虚拟机是可能通过EPT访问统一4K页面上的其它虚拟机的寄存器。
-针对这个问题，根据NVMe规范，通过设置CAP。DSTRD来增大NVMe设备内部寄存器之间的间距，确保每个IO queue pair分布在独立的页面上，从而使虚拟机只能访问其自身的寄存器页面，提升安全性。
+针对这个问题，根据NVMe规范，通过设置CAP.DSTRD来增大NVMe设备内部寄存器之间的间距，确保每个IO queue pair分布在独立的页面上，从而使虚拟机只能访问其自身的寄存器页面，提升安全性。
 
 #### LBA和DMA地址的保护
-仍然存在篡改NVMe命令中的LBA和PRP的坑你，而这些命令是直接会提交到物理NVMe IO队列的。恶意虚拟机可能通过使用修改过的NVMe驱动程序，替换NP前端取驱动程序，来伪造NVMe命令。为此，在NVMe控制器固件中定义并实现了采用NRD机制的NP guarder。通过对SSD控制器中的命令校验进行少量调整，该机制就能够完全组织恶意虚拟机尝试访问非法LBA和PRP。
+仍然存在篡改NVMe命令中的LBA和PRP的可能，而这些命令是直接会提交到物理NVMe IO队列的。恶意虚拟机可能通过使用修改过的NVMe驱动程序，替换NP前端取驱动程序，来伪造NVMe命令。为此，在NVMe控制器固件中定义并实现了采用NRD机制的NP guarder。通过对SSD控制器中的命令校验进行少量调整，该机制就能够完全组织恶意虚拟机尝试访问非法LBA和PRP。
 
 NP guarder的核心思想是：将LBA和PRP与IO队列绑定，形成一个NVMe资源域（NRD）。每个虚拟机只能访问属于该NRD的资源。
 在虚拟机发出的每个IO请求上，SSD控制器会从主机内存中获取命令，并验证目标LBA和PRP是否属于预先分配的NRD。如果不是，则向虚拟机返回IO错误，IO命令不会被执行。否则，该命令将正常处理。因此，可以完全防止恶意IO，保证安全。
@@ -162,7 +162,7 @@ NP guarder的核心思想是：将LBA和PRP与IO队列绑定，形成一个NVMe�
 除了提交IO请求外，高效的DMA数据传输和中断处理对于高性能NVMe虚拟化非常重要。为此，NVMePass在不经过VM-Exit的情况下处理中断
 
 #### DMA重映射
-NMVe IO请求包含PRP或Scatter Gather List(SGL)，即主机内存中用于数据传输的物理内存位置。guest IO请求中的PRP/SGL地址是GPA。对于发起DMA事务的NVMe设备，必须把GPA转换为HPA，而IOMMU会自动执行GPA-HPA的地址转换。
+NMVe IO请求包含PRP或Scatter Gather List(SGL)，即主机内存中用于数据传输的物理内存位置。guest IO请求中的PRP/SGL地址是GPA。对于发起DMA事务的NVMe设备，GPA必须要转换为HPA，而IOMMU会自动执行GPA-HPA的地址转换。
 
 为确保虚拟NVMe设备在虚拟机中使用的PRP/SGL地址相互隔离，hypervisor在初始化时会为每个虚拟机设置互不重叠的GPA地址。
 
@@ -170,7 +170,7 @@ NMVe IO请求包含PRP或Scatter Gather List(SGL)，即主机内存中用于数�
 为提供高效的中断处理，NVMePass将IOMMU中断重映射单元与posted-interrupt机制结合。posted-interrupt是一种机制，允许中断直接由虚拟机接收。具体而言，NP后端驱动使用IRQ旁路管理器配置posted interrupt queues
 
 ## NP device manager
-NVMePass通过虚拟化hypervisor中的NP设备管理器，为虚拟机呈现虚拟化NVMe设备。NP设备管理器使用软件模拟控制资源，并将其与NP后端驱动程序分配的数据资源相结合。NVMePass使用传统的捕获并模拟方法，在虚拟化管理程序中模拟这些控制资源。
+NVMePass通过hypervisor中的NP设备管理器，为虚拟机呈现虚拟化NVMe设备。NP设备管理器使用软件模拟控制资源，并将其与NP后端驱动程序分配的数据资源相结合。NVMePass使用传统的捕获并模拟方法，在虚拟化管理程序中模拟这些控制资源。
 
 当虚拟机访问NP设备管理器的控制资源时，会引发VM-Exit并将其捕获到host，然后由hypervisor接管虚拟机请求。
 随后，hypervisor读取/更新相关的虚拟寄存器。
@@ -181,3 +181,5 @@ NVMePass可为虚拟机提供的虚拟NVMe设备数量受限于SSD中实现的NV
 
 ## implementation
 该kernel，guest kernel中修改为NP前端驱动程序。host中直接利用原始的NVMe驱动程序和VFIO-mdef框架实现NP后端驱动。在firecracker中，添加对VFIO设备的支持，采用VFIO-mdev框架，为NP设备管理器提供NVMe数据资源。
+
+# evaluation
