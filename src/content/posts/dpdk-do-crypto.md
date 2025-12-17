@@ -1,5 +1,5 @@
 ---
-title: dpdk-do-sym-crypto
+title: dpdk-do-crypto
 published: 2025-12-05
 description: 'a sample code to perform a dpdk sym crypto op'
 image: ''
@@ -592,7 +592,6 @@ cleaning resources ...
 
 #define ASYM_SESS_POOL_NAME "asym_sess_pool"
 #define ASYM_OP_POOL_NAME "asym_op_pool"
-#define MBUF_POOL_NAME "data_mbuf_pool"
 #define ASYM_OPS_PER_POOL 2048
 #define MBUFS_PER_POOL 2048
 #define ASYM_SESS_PER_POOL 2048
@@ -602,6 +601,9 @@ cleaning resources ...
 
 #define PUBLIC_KEY_FILE "public.pem"
 #define PRIVATE_KEY_FILE "private.pem"
+
+static struct rte_mempool *asym_op_pool = NULL;
+static struct rte_mempool *asym_sess_pool = NULL;
 
 typedef struct {
   // modules
@@ -616,14 +618,14 @@ typedef struct {
 
 bool load_rsa_key_components(RsaKeyData* data) {
     bool ret = false;
-
+    
     FILE* fp = fopen(PRIVATE_KEY_FILE, "r");
     if (!fp) {
         fprintf(stderr, "Error: failed to open rsa private key file\n");
         goto cleanup;
     }
 
-    // 1. read private key
+    // 1. read private key 
     EVP_PKEY *pkey = PEM_read_PrivateKey(fp, NULL, NULL, NULL);
     fclose(fp);
     fp = NULL;
@@ -655,9 +657,9 @@ bool load_rsa_key_components(RsaKeyData* data) {
         fprintf(stderr, "failed to extract private exponent D\n");
         goto cleanup;
     }
-
+    
     // 4.transform BIGNUM into Big Endian mode
-
+    
     // Modulus (N)
     if (BN_bn2binpad(n, data->n, RSA_KEY_SIZE_BYTES) != RSA_KEY_SIZE_BYTES) {
         fprintf(stderr, "failed to convert N to binary\n");
@@ -676,7 +678,7 @@ bool load_rsa_key_components(RsaKeyData* data) {
         fprintf(stderr, "failed to convert D to binary\n");
         goto cleanup;
     }
-
+    
     ret = true;
 
 cleanup:
@@ -689,10 +691,6 @@ cleanup:
     if (pkey) EVP_PKEY_free(pkey);
     return ret;
 }
-
-static struct rte_mempool *asym_op_pool = NULL;
-static struct rte_mempool *asym_sess_pool = NULL;
-static struct rte_mempool *mbuf_pool = NULL;
 
 static const char* rte_crypto_op_err_msg(const struct rte_crypto_op *op) {
   switch (op->status) {
@@ -744,49 +742,24 @@ static int setup_cryptodev() {
   return cdev_id;
 }
 
-static struct rte_cryptodev_asym_session* create_asym_encrypt_session(uint8_t cdev_id, const RsaKeyData* key_data) {
-  // xform for public key
-  struct rte_crypto_rsa_xform rsa_enc_xform = {
-    .key_type = RTE_RSA_KEY_TYPE_EXP,
-    .n = {.data = (uint8_t *)key_data->n, .length = RSA_KEY_SIZE_BYTES},
-    .e = {.data = (uint8_t *)key_data->e, .length = RSA_KEY_SIZE_BYTES},
-    .padding.type = RTE_CRYPTO_RSA_PADDING_PKCS1_5,
-  };
-
-  struct rte_crypto_asym_xform enc_xform = {
-    .next = NULL,
-    .xform_type = RTE_CRYPTO_ASYM_XFORM_RSA,
-    .rsa = rsa_enc_xform,
-  };
-
-  struct rte_cryptodev_asym_session* sess = NULL;
-  int ret = rte_cryptodev_asym_session_create(cdev_id, &enc_xform, asym_sess_pool, (void**)&sess);
-  if (ret != 0 || !sess) {
-    fprintf(stderr, "failed to create enc asyn session\n");
-    return NULL;
-  }
-  return sess;
-}
-
-static struct rte_cryptodev_asym_session *create_asym_decrypt_session(uint8_t cdev_id, const RsaKeyData* key_data) {
+static struct rte_cryptodev_asym_session *create_asym_session(uint8_t cdev_id, const RsaKeyData *key_data) {
   // xform for private key
-  struct rte_crypto_rsa_xform rsa_dec_xform = {
+  struct rte_crypto_rsa_xform rsa_xform = {
     .key_type = RTE_RSA_KEY_TYPE_EXP,
     .n = {.data = (uint8_t *)key_data->n, .length = RSA_KEY_SIZE_BYTES},
     .e = {.data = (uint8_t *)key_data->e, .length = RSA_KEY_SIZE_BYTES},
     .d = {.data = (uint8_t *)key_data->d, .length = RSA_KEY_SIZE_BYTES},
     .padding.type = RTE_CRYPTO_RSA_PADDING_PKCS1_5,
   };
-  struct rte_crypto_asym_xform dec_xform = {
+  struct rte_crypto_asym_xform asym_xform = {
     .next = NULL,
     .xform_type = RTE_CRYPTO_ASYM_XFORM_RSA,
-    .rsa = rsa_dec_xform,
+    .rsa = rsa_xform,
   };
-
-  struct rte_cryptodev_asym_session* sess = NULL;
-  int ret = rte_cryptodev_asym_session_create(cdev_id, &dec_xform, asym_sess_pool, (void**)&sess);
+  struct rte_cryptodev_asym_session *sess = NULL;
+  int ret = rte_cryptodev_asym_session_create(cdev_id, &asym_xform, asym_sess_pool, (void**)&sess);
   if (ret != 0 || !sess) {
-    fprintf(stderr, "failed to create dec asyn session\n");
+    fprintf(stderr, "failed to create asym_session\n");
     return NULL;
   }
   return sess;
@@ -825,7 +798,7 @@ static bool do_asym_op(uint8_t cdev_id, struct rte_crypto_op *op) {
   return true;
 }
 
-bool perform_rsa_test(uint8_t cdev_id, const RsaKeyData *key_data, struct rte_cryptodev_asym_session* enc_sess, struct rte_cryptodev_asym_session *dec_sess) {
+bool perform_rsa_test(uint8_t cdev_id, const RsaKeyData *key_data, struct rte_cryptodev_asym_session* sess) {
   bool ret = false;
 
   // 1. data prepare
@@ -864,7 +837,7 @@ bool perform_rsa_test(uint8_t cdev_id, const RsaKeyData *key_data, struct rte_cr
   }
 
   // 4. fill op_enc
-  rte_crypto_op_attach_asym_session(op_enc, enc_sess);
+  rte_crypto_op_attach_asym_session(op_enc, sess);
   op_enc->asym->rsa.op_type = RTE_CRYPTO_ASYM_OP_ENCRYPT;
   op_enc->asym->rsa.message.data = in_buf;
   op_enc->asym->rsa.message.length = plaintext_len;
@@ -874,12 +847,12 @@ bool perform_rsa_test(uint8_t cdev_id, const RsaKeyData *key_data, struct rte_cr
   // 5. do asym op encrypt
   if (!do_asym_op(cdev_id, op_enc)) {
     fprintf(stderr, "RSA encryption failed\n");
-    goto cleanup;
+    goto cleanup;    
   }
   printf("Encryption successful, ciphertext length: %zu bytes\n", op_enc->asym->rsa.cipher.length);
-
+  
   // 6. do asym op decrypt
-  rte_crypto_op_attach_asym_session(op_dec, dec_sess);
+  rte_crypto_op_attach_asym_session(op_dec, sess);
   op_dec->asym->rsa.op_type = RTE_CRYPTO_ASYM_OP_DECRYPT;
   op_dec->asym->rsa.cipher.data = cipher_buf;
   op_dec->asym->rsa.cipher.length = RSA_KEY_SIZE_BYTES;
@@ -918,7 +891,7 @@ int main(int argc, char**argv) {
     fprintf(stderr, "failed to load rsa data\n");
     goto cleanup;
   }
-
+  
   rte_eal_init(argc, argv);
 
   // 2. cryptodev setup
@@ -928,19 +901,12 @@ int main(int argc, char**argv) {
     goto cleanup;
   }
 
-  // 3. mbuf & crypto_op mempool alloc
-  mbuf_pool =
-      rte_pktmbuf_pool_create(MBUF_POOL_NAME, MBUFS_PER_POOL, 256, 0,
-                              RTE_MBUF_DEFAULT_BUF_SIZE, rte_socket_id());
+  // 3. sess & crypto_op mempool alloc
   asym_op_pool = rte_crypto_op_pool_create(
       ASYM_OP_POOL_NAME, RTE_CRYPTO_OP_TYPE_ASYMMETRIC, ASYM_OPS_PER_POOL, 0,
       sizeof(struct rte_crypto_asym_op), rte_socket_id());
-  // size_t priv_size = rte_cryptodev_asym_get_private_session_size(cdev_id);
-  asym_sess_pool = rte_cryptodev_asym_session_pool_create(ASYM_SESS_POOL_NAME, ASYM_SESS_PER_POOL, 0, 0, rte_socket_id());
-  if (!mbuf_pool) {
-    fprintf(stderr, "mbuf_pool alloc failed\n");
-    goto cleanup;
-  }
+  size_t priv_size = rte_cryptodev_asym_get_private_session_size(cdev_id);
+  asym_sess_pool = rte_cryptodev_asym_session_pool_create(ASYM_SESS_POOL_NAME, ASYM_SESS_PER_POOL, 0, priv_size, rte_socket_id());
   if (!asym_op_pool) {
     fprintf(stderr, "asym_op_pool alloc failed\n");
     goto cleanup;
@@ -951,17 +917,14 @@ int main(int argc, char**argv) {
   }
 
   // 4. create session
-  struct rte_cryptodev_asym_session *encrypt_sess = create_asym_encrypt_session(cdev_id, key_data);
-  struct rte_cryptodev_asym_session *decrypt_sess = create_asym_decrypt_session(cdev_id, key_data);
+  struct rte_cryptodev_asym_session *sess = create_asym_session(cdev_id, key_data);
 
   // 5. perform test
-  perform_rsa_test(cdev_id, key_data, encrypt_sess, decrypt_sess);
+  perform_rsa_test(cdev_id, key_data, sess);
 
   printf("test complete, cleaning resource...\n");
 cleanup:
-  if (encrypt_sess) rte_cryptodev_asym_session_free(cdev_id, encrypt_sess);
-  if (decrypt_sess) rte_cryptodev_asym_session_free(cdev_id, decrypt_sess);
-  if (mbuf_pool) rte_mempool_free(mbuf_pool);
+  if (sess) rte_cryptodev_asym_session_free(cdev_id, sess);
   if (asym_op_pool) rte_mempool_free(asym_op_pool);
   if (asym_sess_pool) rte_mempool_free(asym_sess_pool);
   rte_cryptodev_stop(cdev_id);
@@ -993,8 +956,8 @@ if(PKG_CONFIG_FOUND)
   endif()
 endif()
 
-add_executable(rsa encrypt.c)
-target_link_libraries(rsa PRIVATE
+add_executable(rsa_enc_dec rsa_enc_dec.c)
+target_link_libraries(rsa_enc_dec PRIVATE
   ${DPDK_LIBRARIES}
   crypto
 )
@@ -1012,7 +975,7 @@ openssl rsa -in private.pem -pubout -out public.pem
 
 ## 运行命令
 ```sh
-./build/rsa -l 6-7 --vdev crypto_openssl
+./build/rsa_enc_dec -l 6-7 --vdev crypto_openssl
 ```
 
 ## 期待输出
@@ -1031,6 +994,112 @@ Original message:
 DPDK rsa2048 test message
 Decrypted message:
 DPDK rsa2048 test message
+test complete, cleaning resource...
+CRYPTODEV: Closing crypto device crypto_openssl
+```
+
+# dpdk使用rsa进行sign和verify
+## 代码
+包括main函数在内的其它所有函数同上，只有原来的`perform_rsa_test`现在变成了下面的这个`perform_rsa_sign_verify_test`
+```c
+static bool perform_rsa_sign_verify_test(uint8_t cdev_id, const RsaKeyData *key_data, struct rte_cryptodev_asym_session *sess) {
+  // 1. param check
+  if (!key_data || !sess) {
+    fprintf(stderr, "nullptr input\n");
+    return false;
+  }
+  bool ret = false;
+
+  // 2. prepare plaintext
+  const char *plaintext = "DPDK rsa sign test message";
+  size_t plaintext_len = strlen(plaintext);
+
+  uint8_t *plain_buf = rte_zmalloc("msg_buf", RSA_KEY_SIZE_BYTES, 0);
+  uint8_t *sign_buf = rte_zmalloc("sign_buf", RSA_KEY_SIZE_BYTES, 0);
+  if (!plain_buf || !sign_buf) {
+    fprintf(stderr, "failed to alloc for buf\n");
+    return false;
+  }
+  memcpy(plain_buf, plaintext, plaintext_len);
+
+  // 3. alloc crypto op
+  struct rte_crypto_op *op = rte_crypto_op_alloc(asym_op_pool, RTE_CRYPTO_OP_TYPE_ASYMMETRIC);
+  if (!op) {
+    fprintf(stderr, "failed to alloc for crypto op");
+    goto cleanup;
+  }
+
+  // 4. fill in op for sign
+  rte_crypto_op_attach_asym_session(op, sess);
+  op->status = RTE_CRYPTO_OP_STATUS_NOT_PROCESSED;
+  op->asym->rsa.op_type = RTE_CRYPTO_ASYM_OP_SIGN;
+  op->asym->rsa.message.data = plain_buf;
+  op->asym->rsa.message.length = plaintext_len;
+  op->asym->rsa.sign.data = sign_buf;
+  op->asym->rsa.sign.length = RSA_KEY_SIZE_BYTES;
+
+  // 5. sign
+  if (!do_asym_op(cdev_id, op)) {
+    fprintf(stderr, "rsa sign failed\n");
+    goto cleanup;
+  }
+  printf("RSA sign success, signature generated\n");
+
+  // 6. fill in op for verify
+  op->status = RTE_CRYPTO_OP_STATUS_NOT_PROCESSED;
+  op->asym->rsa.op_type = RTE_CRYPTO_ASYM_OP_VERIFY;
+  op->asym->rsa.sign.data = sign_buf;
+  op->asym->rsa.sign.length = RSA_KEY_SIZE_BYTES;
+  op->asym->rsa.message.data = plain_buf;
+  op->asym->rsa.message.length = plaintext_len;
+  
+  // 7. verify
+  if (!do_asym_op(cdev_id, op)) {
+    fprintf(stderr, "RSA verify failed\n");
+    goto cleanup;
+  } else {
+    printf("verify success\n");
+    ret = true;
+  }
+
+  // 8. mallicious verify
+  // signed data bytes reverted
+  uint8_t *err_buf = rte_zmalloc("err_buf", RSA_KEY_SIZE_BYTES, 0);
+  memcpy(err_buf, sign_buf, RSA_KEY_SIZE_BYTES);
+  err_buf[0] ^= 0xff;
+  op->status = RTE_CRYPTO_OP_STATUS_NOT_PROCESSED;
+  op->asym->rsa.op_type = RTE_CRYPTO_ASYM_OP_VERIFY;
+  op->asym->rsa.sign.data = err_buf;
+  op->asym->rsa.sign.length = RSA_KEY_SIZE_BYTES;
+  op->asym->rsa.message.data = plain_buf;
+  op->asym->rsa.message.length = plaintext_len;
+  bool err_res = do_asym_op(cdev_id, op);
+  if (!err_res) {
+    printf("mallicious verify FAILED as expected, status: %s\n", rte_crypto_op_err_msg(op));
+  } else {
+    fprintf(stderr, "mallicious check failed\n");
+    ret = false;
+    goto cleanup;
+  }
+
+cleanup:
+  if (plain_buf) rte_free(plain_buf);
+  if (sign_buf) rte_free(sign_buf);
+  if (err_buf) rte_free(err_buf);
+  if (op) rte_crypto_op_free(op);
+  return ret;
+}
+```
+
+## 期待输出
+```
+EAL: Selected IOVA mode 'VA'
+CRYPTODEV: Creating cryptodev crypto_openssl
+CRYPTODEV: Initialisation parameters - name: crypto_openssl,socket id: 0, max queue pairs: 8
+RSA sign success, signature generated
+verify success
+operation failed, status: error
+mallicious verify FAILED as expected, status: error
 test complete, cleaning resource...
 CRYPTODEV: Closing crypto device crypto_openssl
 ```
