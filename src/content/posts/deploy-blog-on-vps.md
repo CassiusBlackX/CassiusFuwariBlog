@@ -35,7 +35,7 @@ chmod +x hooks/post-receive
 #!/bin/bash
 
 # 把pnpm和node所在的路径添加到环境变量中
-export PATH=/root/.nvm/versions/node/v22.17.1/bin:$PATH
+export PATH=/root/.nvm/versions/node/v24.12.0/bin:$PATH
 
 TARGET="/var/www/html" # ngingx/caddy所指向的网页的根目录,index.html所在的目录
 GIT_DIR="/var/www/blog.git" # 用来当作git仓库的目录
@@ -47,8 +47,8 @@ git --work-tree=$WORK_TREE --git-dir=$GIT_DIR checkout -f
 
 cd $WORK_TREE
 # 保险起见,使用完整路径来使用pnpm
-/root/.nvm/versions/node/v22.17.1/bin/pnpm install 
-/root/.nvm/versions/node/v22.17.1/bin/pnpm build
+/root/.nvm/versions/node/v24.12.0/bin/pnpm install 
+/root/.nvm/versions/node/v24.12.0/bin/pnpm build
 
 mkdir -p $TARGET
 # 使用rsync来复制文件,减少不必要的重复覆盖,也能够自动删除不再存在的文件
