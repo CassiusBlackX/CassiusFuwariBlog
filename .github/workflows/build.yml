@@ -120,5 +120,5 @@ jobs:
           for host in $(echo "$REMOTE_HOSTS" | tr ',' ' '); do
             port="${SSH_PORT:-22}"
             ssh -p "$port" -o StrictHostKeyChecking=yes "${REMOTE_USER}@${host}" "mkdir -p '${REMOTE_PATH}'"
-            rsync -avz --delete -e "ssh -p $port" dist/ "${REMOTE_USER}@${host}":"${REMOTE_PATH}"
+            rsync -avz --delete --omit-dir-times --no-perms --no-owner --no-group  --chmod=Du=rwx,Dg=rwx,Fu=rw,Fg=rw -e "ssh -p $port" dist/ "${REMOTE_USER}@${host}":"${REMOTE_PATH}"
           done
