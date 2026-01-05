@@ -129,3 +129,104 @@ git config merge.ours.driver true
 ```sh
 git merge fuwari/main --allow-unrelated-histories
 ```
+
+# 基于github actions编译博客并部署到服务器
+## 创建专用的用户并分配权限
+为了安全起见，专门创建一个`deployer`用户用于在github actions中上传编译好的静态博客。
+```sh
+# create user
+sudo useradd -m -s /bin/bash deployer
+sudo mkdir -p /home/deployer/.ssh
+sudo chown -R deployer:deployer /home/deployer/.ssh
+sudo chmod 700 /home/deployer/.ssh
+sudo chmod 600 /home/deployer/.ssh/authorized_keys
+```
+把`deployer`加入到`www-data`用户组
+```sh
+sudo usermod -aG www-data deployer
+```
+创建并设置blog目录的权限+setgid
+```sh
+sudo mkdir -p /var/www/blog
+sudo chown -R www-data:www-data /var/www/blog
+# setgid: new file/dir inherit from parent
+sudo find /var/www/blog -type d -exec chmod 2775 {} \;
+sudo find /var/www/blog -type f -exec chmod 664 {} \;
+# make sure we are writable
+sudo chmod -R g+rwX /var/www/blog
+```
+设置默认ACL，确保新文件集成租rw权限
+```sh
+sudo apt-get update && sudo apt-get install -y acl
+sudo setfacl -R -m g:www-data:rwX /var/www/blog
+sudo setfacl -R -d -m g:www-data:rwX /var/www/blog
+```
+## 配置github action
+在`.github/workflows`中，可以新创建，也可以直接复用，新增以下job
+```yaml
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    name: Deploy to Servers
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.12.0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build site
+        run: pnpm astro build
+
+      - name: Ensure rsync and ssh available
+        run: sudo apt-get update && sudo apt-get install -y rsync openssh-client
+
+      - name: Start ssh-agent and add key
+        uses: webfactory/ssh-agent@v0.5.3
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add remote hosts to known_hosts
+        env:
+          REMOTE_HOSTS: ${{ secrets.REMOTE_HOSTS }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+        run: |
+          for host in $(echo "$REMOTE_HOSTS" | tr ',' ' '); do
+            port="${SSH_PORT:-22}"
+            ssh-keyscan -p "$port" -H "$host" >> ~/.ssh/known_hosts || true
+          done
+
+      - name: Rsync dist/ to each remote host
+        env:
+          REMOTE_HOSTS: ${{ secrets.REMOTE_HOSTS }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PATH: ${{ secrets.REMOTE_PATH }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+        run: |
+          set -e
+          for host in $(echo "$REMOTE_HOSTS" | tr ',' ' '); do
+            port="${SSH_PORT:-22}"
+            ssh -p "$port" -o StrictHostKeyChecking=yes "${REMOTE_USER}@${host}" "mkdir -p '${REMOTE_PATH}'"
+            rsync -avz --delete --omit-dir-times --no-perms --no-owner --no-group  --chmod=Du=rwx,Dg=rwx,Fu=rw,Fg=rw -e "ssh -p $port" dist/ "${REMOTE_USER}@${host}":"${REMOTE_PATH}"
+          done
+
+```
+需要在`settings`中设置的环境变量有
++ `REMOTE_HOSTS`:逗号分隔的VPS的IP地址
++ `REMOTE_PATH`: 部署博客的位置（如果按照上面的命令，那么就是`/var/www/blog`目录）
++ `REMOTE_USER`: 用于ssh的用户（按照上面的命令就是`deployer`）
++ `SSH_PORT`: 一般就是22，除非有特殊情况
++ `SSH_PRIVATE_KEY`: ssh私钥，cat出来的所有内容直接复制粘贴进去
+
+然后commit并push，就会自动运行并上传到服务器了。如果遇到了问题，github会邮件通知。

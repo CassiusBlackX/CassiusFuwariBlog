@@ -3,7 +3,7 @@ title: acme & nginx setup on a new server
 published: 2025-03-18
 description: 'how to setup acme and nginx on a new server to deploy personal site'
 image: ''
-tags: ["linux", "network", "nginx", "acme.sh"]
+tags: ["linux", "web", "nginx", "acme.sh"]
 category: 'deployment'
 draft: false 
 lang: ''
