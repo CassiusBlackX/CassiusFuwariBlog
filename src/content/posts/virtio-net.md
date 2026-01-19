@@ -3,7 +3,7 @@ title: virtio-net
 published: 2025-10-25
 description: 'virtio-net驱动研究'
 image: ''
-tags: ["virtualization", "virtio", "net"]
+tags: ["virtualization", "virtio"]
 category: 'notes'
 draft: false 
 lang: ''

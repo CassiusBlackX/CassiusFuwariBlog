@@ -3,8 +3,8 @@ title: ics-pa-implementation
 published: 2024-05-07
 description: ''
 image: ''
-tags: []
-category: ''
+tags: ["linux", "qemu"]
+category: 'notes'
 draft: false 
 lang: ''
 ---
@@ -22,15 +22,19 @@ lang: ''
 利用strtok()函数可以读出si接续的参数N（如果有的话，没有则默认N值为1），并调用cpu_exec()函数来完成对于N步的执行。代码如下。
 
 ```c
-static int cmd_si(char *args){
-  char *steps = strtok(args, " ");
-  int n=1;
-  if(steps != NULL){
-    n = atoi(steps);      // ascii to integer
+static int cmd_si(char *args) {
+  char *arg = strtok(NULL, " ");
+  int n;
+  if (arg == NULL) {
+    n = 1;
+  }
+  else {
+    n = atoi(arg);
   }
   cpu_exec(n);
   return 0;
 }
+
 ```
 
 ### PA1.2 打印寄存器
