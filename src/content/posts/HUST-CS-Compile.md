@@ -3,7 +3,7 @@ title: 编译原理复习
 published: 2025-06-24
 description: '华中科技大学 计算机科学与技术学院 编译原理复习'
 image: ''
-tags: ["HUST", "compile"]
+tags: ["HUST"]
 category: 'notes'
 draft: false 
 lang: ''

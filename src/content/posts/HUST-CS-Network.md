@@ -3,7 +3,7 @@ title: 计算机网络复习
 published: 2024-12-12
 description: '华中科技大学 计算机科学与技术学院 计算机网络复习'
 image: ''
-tags: ["HUST", "network"]
+tags: ["HUST"]
 category: notes
 draft: false 
 lang: ''

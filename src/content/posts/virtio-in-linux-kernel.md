@@ -3,7 +3,7 @@ title: virtio-in-linux-kernel
 published: 2025-10-11
 description: linux内核中的virtio
 image: ''
-tags: ['virtualization', 'virtio', 'vhost']
+tags: ['virtualization']
 category: 'notes'
 draft: false 
 lang: ''

@@ -3,8 +3,8 @@ title: af_alg-crypto
 published: 2026-02-01
 description: '调用AF_ALG API执行加解密'
 image: ''
-tags: []
-category: ''
+tags: ["linux", "crypto", "network"]
+category: 'deployment'
 draft: false 
 lang: ''
 ---

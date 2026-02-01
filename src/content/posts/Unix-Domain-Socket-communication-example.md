@@ -3,8 +3,8 @@ title: Unix-Domain-Socket-communication-example
 published: 2025-11-22
 description: '利用UDS实现进程间通信'
 image: ''
-tags: []
-category: ''
+tags: ["linux", "network", "async io"]
+category: 'deployment'
 draft: false 
 lang: ''
 ---

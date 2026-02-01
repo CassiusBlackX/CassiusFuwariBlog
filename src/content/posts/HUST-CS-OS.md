@@ -3,7 +3,7 @@ title: 操作系统复习
 published: 2025-01-07
 description: '华中科技大学 计算机科学与技术学院 操作系统复习'
 image: ''
-tags: ["HUST", "OS"]
+tags: ["HUST"]
 category: notes
 draft: false 
 lang: ''

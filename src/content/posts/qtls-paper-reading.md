@@ -3,8 +3,8 @@ title: qtls-paper-reading
 published: 2026-01-24
 description: '论文QTLS: High-Performance TLS asynchronous offload framework'
 image: ''
-tags: []
-category: ''
+tags: ["linux", "virtualization"]
+category: notes
 draft: false 
 lang: ''
 ---

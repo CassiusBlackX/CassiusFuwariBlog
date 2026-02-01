@@ -3,8 +3,8 @@ title: autohotkey-configure
 published: 2025-08-08
 description: '配置autohotkey v2'
 image: ''
-tags: ["windows", "autohotkey"]
-category: 'deployment'
+tags: ["Windows"]
+category: 'cmd'
 draft: false 
 lang: ''
 ---

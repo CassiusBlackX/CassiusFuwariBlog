@@ -3,7 +3,7 @@ title: 计算机组成原理复习
 published: 2024-07-06
 description: '华中科技大学 计算机科学与技术学院 计算机组成原理复习'
 image: ''
-tags: ["HUST", "composition"]
+tags: ["HUST"]
 category: notes
 draft: false 
 lang: ''
