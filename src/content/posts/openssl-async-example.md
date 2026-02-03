@@ -8,7 +8,6 @@ category: 'deployment'
 draft: false 
 lang: ''
 ---
-
 # openssl async hardware simulation
 ```c
 #include <errno.h>
@@ -477,4 +476,434 @@ cleanup:
   printf("========================================\n");
   return 0;
 }
+```
+
+
+# 前后端分离的openssl加解密任务异步卸载
+基于DPDK共享内存，实现前后端分离的openssl ASYNC方式的加解密任务异步卸载的模拟。
+## 公共头文件
+```c
+// common.h
+#ifndef CRYPTO_ASYNC_COMMON_H
+#define CRYPTO_ASYNC_COMMON_H
+
+#include <stdarg.h>
+#include <stddef.h>
+
+#include <rte_common.h>
+#include <rte_mempool.h>
+#include <rte_ring.h>
+#include <stdio.h>
+
+#define MEMPOOL_NAME "MSG_POOL"
+#define MSG_STRUCT_POOL "MSG_STRUCT_POOL"
+#define RING_FE_TO_BE "FE_TO_BE"
+#define RING_BE_TO_FE "BE_TO_FE"
+#define MP_MSG_NAME "fd_sync"
+
+#define MAX_JOBS 4
+#define MAX_DATA_LEN 1024
+#define POOL_SIZE 1024
+#define CACHE_SIZE 0
+
+typedef struct {
+  void *data;
+  size_t len;
+  int job_id;
+} task_msg;
+
+static inline void _log_error(const char *fe_be, const char *func, int line,
+                              const char *fmt, ...)
+    __attribute__((format(printf, 4, 5)));
+
+static inline void _log_error(const char *fe_be, const char *func, int line,
+                              const char *fmt, ...) {
+  fprintf(stderr, "[%s]ERROR(%s:%d):", fe_be, func, line);
+  va_list args;
+  va_start(args, fmt);
+  vfprintf(stderr, fmt, args);
+  va_end(args);
+  fprintf(stderr, "\n");
+}
+
+static inline void _log_info(const char *fe_be, const char *func, int line,
+                              const char *fmt, ...)
+    __attribute__((format(printf, 4, 5)));
+
+static inline void _log_info(const char *fe_be, const char *func, int line,
+                              const char *fmt, ...) {
+  fprintf(stdout, "[%s]INFO(%s:%d):", fe_be, func, line);
+  va_list args;
+  va_start(args, fmt);
+  vfprintf(stdout, fmt, args);
+  va_end(args);
+  fprintf(stdout, "\n");
+}
+
+#ifndef FE_BE
+#error "FE_BE must be defined before including common.h"
+#endif // FE_BE
+#define log_error(fmt, ...)                                                    \
+  _log_error(FE_BE, __func__, __LINE__, fmt, ##__VA_ARGS__)
+#define log_info(fmt, ...)                                                    \
+  _log_info(FE_BE, __func__, __LINE__, fmt, ##__VA_ARGS__)
+
+#endif // CRYPTO_ASYNC_COMMON_H
+```
+
+## 前端
+```c
+#include <errno.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <sys/epoll.h>
+#include <sys/eventfd.h>
+#include <unistd.h>
+
+#include <openssl/async.h>
+
+#include <rte_eal.h>
+#include <rte_mempool.h>
+#include <rte_ring.h>
+
+#define FE_BE "frontend"
+#include "common.h"
+
+#define MAX_EVENTS 16
+
+static struct rte_mempool *mp_data = NULL;
+static struct rte_mempool *mp_struct = NULL;
+static struct rte_ring *fe_to_be = NULL;
+static struct rte_ring *be_to_fe = NULL;
+
+typedef struct {
+  int id;
+  ASYNC_JOB *job;
+  ASYNC_WAIT_CTX *waitctx;
+  int evfd;
+  task_msg *msg;
+  struct rte_ring *fe_to_be;
+  struct rte_ring *be_to_fe;
+  struct rte_mempool *mp_data;
+  struct rte_mempool *mp_struct;
+} job_ctx;
+
+static int async_job_func(void *arg) {
+  job_ctx *ctx = (job_ctx *)arg;
+  task_msg *msg = ctx->msg;
+  if (!ctx || !msg) {
+    log_error("got NULL in ctx(%p) or msg(%p)", ctx, msg);
+    return -1;
+  }
+
+  // prepare data
+  uint8_t *data_ptr = NULL;
+  if (rte_mempool_get(ctx->mp_data, (void **)&data_ptr) < 0) {
+    log_error("failed to get in mp_data");
+    return -1;
+  }
+
+  msg->data = data_ptr;
+  int len = snprintf((char *)data_ptr, MAX_DATA_LEN, "hello from frontend: %d",
+                     ctx->id);
+  if (len < 0) {
+    log_error("failed to fill in data_ptr");
+  }
+  msg->len = len + 1;
+  msg->job_id = ctx->id;
+  log_info("job-%d: sending task, msg_addr: %p, data[0]=%#x\n", ctx->id, msg, 
+            data_ptr[0]);
+
+  // send to backend
+  if (rte_ring_enqueue(ctx->fe_to_be, msg) < 0) {
+    log_error("failed to enqueue to be");
+    rte_mempool_put(ctx->mp_data, data_ptr);
+    return -1;
+  }
+  log_info("job-%d: enqueue done, pause", ctx->id);
+  ASYNC_pause_job();
+  log_info("job-%d: resumed, result data[0]=%#x", ctx->id, data_ptr[0]);
+
+  // NOTE: the following steps are useless!
+  // wait for result msg to return (optional, just to cleanup)
+  task_msg *tmp_msg = NULL;
+  while (rte_ring_dequeue(ctx->be_to_fe, (void **)&tmp_msg) != 0) {
+    rte_pause();
+  }
+  uint8_t *tmp_ptr = tmp_msg->data;
+  log_info("job-%d: got msg: %p, data[0]: %#x", ctx->id, tmp_msg, tmp_ptr[0]);
+
+  // free resource
+  rte_mempool_put(ctx->mp_data, data_ptr);
+  return 0;
+}
+
+// send eventfd to primary proc
+static void sync_evfd_to_primary(int job_id, int evfd) {
+  struct rte_mp_msg msg;
+  memset(&msg, 0, sizeof(msg));
+  snprintf(msg.name, RTE_MP_MAX_NAME_LEN, "%s", MP_MSG_NAME);
+  msg.len_param = sizeof(int);
+  msg.num_fds = 1;
+  *(int *)msg.param = job_id;
+  msg.fds[0] = evfd;
+  rte_mp_sendmsg(&msg);
+}
+
+int main(int argc, char **argv) {
+  int ret, epfd;
+  job_ctx jobs[MAX_JOBS] = {0};
+  int job_rets[MAX_JOBS] = {0};
+  memset(jobs, 0, sizeof(jobs));
+  memset(job_rets, 0, sizeof(job_rets));
+
+  ret = rte_eal_init(argc, argv);
+  if (ret < 0) {
+    log_error("eal init failed");
+    exit(1);
+  }
+
+  mp_data = rte_mempool_lookup(MEMPOOL_NAME);
+  mp_struct = rte_mempool_lookup(MSG_STRUCT_POOL);
+  fe_to_be = rte_ring_lookup(RING_FE_TO_BE);
+  be_to_fe = rte_ring_lookup(RING_BE_TO_FE);
+
+  if (!mp_data || !mp_struct || !fe_to_be || !be_to_fe) {
+    log_error("failed to lookup mempool/ring. mp_data: %p, mp_struct: %p, "
+              "fe_to_be: %p, be_to_fe: %p",
+              mp_data, mp_struct, fe_to_be, be_to_fe);
+    exit(1);
+  }
+
+  epfd = epoll_create1(0);
+  if (epfd < 0) {
+    log_error("failed to create epoll fd");
+    exit(1);
+  }
+
+  // initialize jobs
+  for (int i = 0; i < MAX_JOBS; i++) {
+    jobs[i].id = i;
+    jobs[i].job = NULL;
+    jobs[i].mp_data = mp_data;
+    jobs[i].mp_struct = mp_struct;
+    jobs[i].fe_to_be = fe_to_be;
+    jobs[i].be_to_fe = be_to_fe;
+
+    // allocate msg struct from mempool
+    if (rte_mempool_get(mp_struct, (void **)&jobs[i].msg) < 0) {
+      log_error("failed to alloc for jobs[%d].msg", i);
+      goto cleanup;
+    }
+
+    jobs[i].evfd = eventfd(0, EFD_NONBLOCK);
+    if (jobs[i].evfd < 0) {
+      log_error("failed to create evfd for jobs[%d]", i);
+      goto cleanup;
+    }
+
+    jobs[i].waitctx = ASYNC_WAIT_CTX_new();
+    ASYNC_WAIT_CTX_set_wait_fd(jobs[i].waitctx, jobs[i].waitctx, jobs[i].evfd,
+                               NULL, NULL);
+
+    // send fd to primary
+    sync_evfd_to_primary(i, jobs[i].evfd);
+
+    struct epoll_event ev = {
+        .events = EPOLLIN,
+        .data.ptr = &jobs[i],
+    };
+    epoll_ctl(epfd, EPOLL_CTL_ADD, jobs[i].evfd, &ev);
+
+    ASYNC_start_job(&jobs[i].job, jobs[i].waitctx, &job_rets[i], async_job_func,
+                    &jobs[i], sizeof(jobs[i]));
+  }
+  log_info("frontend started, waiting for events...");
+
+  int active_jobs = MAX_JOBS;
+  struct epoll_event events[MAX_EVENTS];
+  while (active_jobs > 0) {
+    int nfds = epoll_wait(epfd, events, MAX_EVENTS, -1);
+    if (nfds < -1) {
+      log_error("error in epoll_wait, err: %s", strerror(errno));
+    }
+
+    for (int i = 0; i < nfds; i++) {
+      job_ctx *ctx = (job_ctx *)events[i].data.ptr;
+      uint64_t val;
+      read(ctx->evfd, &val, sizeof(val));
+
+      int job_ret;
+      ret = ASYNC_start_job(&ctx->job, ctx->waitctx, &job_ret, async_job_func,
+                            ctx, sizeof(*ctx));
+
+      switch (ret) {
+      case ASYNC_FINISH:
+        active_jobs--;
+        rte_mempool_put(mp_struct, ctx->msg);
+        log_info("job: %d done, job_ret: %d", ctx->id, job_ret);
+        break;
+      case ASYNC_NO_JOBS:
+        log_info("got no job in :%d", ctx->id);
+        break;
+      case ASYNC_ERR:
+        log_error("got error in %d", ctx->id);
+        break;
+      case ASYNC_PAUSE:
+        log_info("got pause in %d", ctx->id);
+        break;
+      }
+    }
+  }
+
+  log_info("all jobs done, frontend exiting...");
+  rte_eal_cleanup();
+
+cleanup:
+  return 0;
+}
+```
+
+## 后端
+```c
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <signal.h>
+#include <unistd.h>
+
+#include <rte_eal.h>
+#include <rte_errno.h>
+#include <rte_lcore.h>
+#include <rte_ring_core.h>
+#include <rte_mempool.h>
+#include <rte_ring.h>
+
+#define FE_BE "backend"
+#include "common.h"
+
+static sig_atomic_t quit = 0;
+static int job_evfds[MAX_JOBS] = {0};
+
+static struct rte_mempool *mp_data = NULL;
+static struct rte_mempool *mp_struct = NULL;
+static struct rte_ring *fe_to_be = NULL;
+static struct rte_ring *be_to_fe = NULL;
+
+void sigint_handler(int id) {
+  if (id == SIGINT || id == SIGTERM) {
+    quit = 1;
+  }
+}
+
+static int handle_fd_sync(const struct rte_mp_msg *msg,
+                          const void *peer __attribute__((unused))) {
+  int job_id = *(int *)msg->param;
+  if (job_id >= 0 && job_id < MAX_JOBS) {
+    job_evfds[job_id] = msg->fds[0];
+    log_info("received evfd %d for job %d", job_evfds[job_id], job_id);
+  } else {
+    log_error("received evfd %d for job %d", job_evfds[job_id], job_id);
+  }
+  return 0;
+}
+
+int main(int argc, char **argv) {
+  int ret;
+  ret = rte_eal_init(argc, argv);
+  if (ret < 0) {
+    log_error("eal init failed");
+    exit(1);
+  }
+  signal(SIGINT, sigint_handler);
+  signal(SIGTERM, sigint_handler);
+  for (int i = 0; i < MAX_JOBS; i++) {
+    job_evfds[i] = -1;
+  }
+
+  rte_mp_action_register(MP_MSG_NAME, handle_fd_sync);
+
+  // create mempool
+  mp_data =
+      rte_mempool_create(MEMPOOL_NAME, POOL_SIZE, MAX_DATA_LEN, CACHE_SIZE, 0,
+                         NULL, NULL, NULL, NULL, rte_socket_id(), 0);
+  mp_struct = rte_mempool_create(MSG_STRUCT_POOL, POOL_SIZE, sizeof(task_msg),
+                                 CACHE_SIZE, 0, NULL, NULL, NULL, NULL,
+                                 rte_socket_id(), 0);
+
+  if (mp_data == NULL) {
+    log_error("mp_data mempool create failed");
+    exit(1);
+  }
+  if (mp_struct == NULL) {
+    log_error("mp_struct mempool create failed");
+    exit(1);
+  }
+
+  // create ring
+  fe_to_be =
+      rte_ring_create(RING_FE_TO_BE, 1024, rte_socket_id(), RING_F_SC_DEQ);
+  be_to_fe =
+      rte_ring_create(RING_BE_TO_FE, 1024, rte_socket_id(), RING_F_SC_DEQ);
+  if (!fe_to_be || !be_to_fe) {
+    log_error("failed to create ring");
+    goto cleanup;
+  }
+  log_info("dpdk resource prepared success, polling tasks...");
+
+  while (!quit) {
+    task_msg *msg = NULL;
+    if (rte_ring_dequeue(fe_to_be, (void **)&msg) == 0) {
+      // dequeued msg from frontend
+      uint8_t *p = (uint8_t *)msg->data;
+      if (p) {
+        for (size_t i = 0; i < msg->len; i++) {
+          // bitwise NOT to simulate encrypt process
+          p[i] = ~p[i];
+        }
+      } else {
+        log_error("null ptr in msg");
+      }
+
+      // sleep a while to pretend hardware processing
+      usleep(100000 * (rand() % 10));
+
+      // notify frontend using the stored eventfd
+      if (msg->job_id >= 0 && msg->job_id < MAX_JOBS &&
+          job_evfds[msg->job_id] > 0) {
+        uint64_t val = 1;
+        if (write(job_evfds[msg->job_id], &val, sizeof(val)) != sizeof(val)) {
+          perror("write evfd");
+        } else {
+          log_info("write evfd: %d to wake up frontend job_id: %d",
+                   job_evfds[msg->job_id], msg->job_id);
+        }
+      }
+
+      // optional: enqueue msg ptr backend to frontend
+      // this step is useless, because frontend itself can have access to msg
+      rte_ring_enqueue(be_to_fe, msg);
+    }
+  }
+
+  log_info("receive sigint/sigterm, shutting down...");
+
+cleanup:
+  if (mp_data)
+    rte_mempool_free(mp_data);
+  if (mp_struct)
+    rte_mempool_free(mp_struct);
+  if (fe_to_be)
+    rte_ring_free(fe_to_be);
+  if (be_to_fe)
+    rte_ring_free(be_to_fe);
+  rte_eal_cleanup();
+  return 0;
+}
+
 ```
